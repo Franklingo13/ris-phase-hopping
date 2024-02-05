@@ -9,16 +9,12 @@ import hankel
 from phases import rvs_channel_phases, rvs_ris_phases, gains_constant_phase, rvs_ris_phases_quant
 from utils import export_results
 
-
 @np.vectorize
 def inverse_exp_expi(y):
     def exp_expi(x):
         return -np.exp(x)*special.expi(-x)
-    #sol = optimize.root_scalar(lambda x: (exp_expi(x)-y)**2, bracket=(0., np.inf))
     sol = optimize.minimize(lambda x: (exp_expi(x)-y)**2, (1e-16,), bounds=optimize.Bounds(0, np.inf))
-    #print(sol)
     return sol.x
-
 
 def ergodic_capac_approximation(num_elements, los_amp):
     if num_elements == 0:
@@ -33,9 +29,9 @@ def ergodic_capac_exact(num_elements, los_amp=0.):
     if num_elements == 0:
         return 0.
     elif num_elements == 1:
-        return 1. #log2(1+1)
+        return 1.
     if los_amp > 0:
-        raise NotImplementedError("Right now, only the NLOS case is supported.")
+        raise NotImplementedError("En este momento, solo se admite el caso NLOS.")
     nu = 0
     _int_func = lambda x: special.j0(x)**num_elements
     _h, _, _N = hankel.get_h(_int_func, nu=nu)
@@ -51,10 +47,9 @@ def ergodic_capac_exact(num_elements, los_amp=0.):
         cap_erg = _quad_int[0]
     return cap_erg
 
-
 def _process_batch(batch, num_batches, batch_size, num_elements, conn_prob,
                    los_amp, num_samples_fast, quant=None):
-    print("Work on batch {:d}/{:d}".format(batch+1, num_batches))
+    print("Trabajando en lote {:d}/{:d}".format(batch+1, num_batches))
     if los_amp > 0:
         los_phases = 2*np.pi*np.random.rand(batch_size)
         los_phases = np.tile(los_phases, (num_samples_fast, 1))
@@ -78,7 +73,6 @@ def _process_batch(batch, num_batches, batch_size, num_elements, conn_prob,
                                        los_amp=los_amp,
                                        path_amp=channel_absolute)
     capac_const_phase = np.log2(1 + const_phase)
-    #expect_capac = np.append(expect_capac, np.mean(capac_const_phase, axis=0))
     return np.mean(capac_const_phase, axis=0)
 
 def random_ris_phases(num_elements, connect_prob=[1.], los_amp=1., num_samples_slow=1000, num_samples_fast=5000,
@@ -91,9 +85,9 @@ def random_ris_phases(num_elements, connect_prob=[1.], los_amp=1., num_samples_s
     erg_cap_exact = []
 
     num_batches, last_batch = np.divmod(num_samples_slow, batch_size)
-    #for _num_elements in num_elements:
+
     for _num_elements, _conn_prob in it.product(num_elements, connect_prob):
-        print("Work on N={:d}, p={:.3f}".format(_num_elements, _conn_prob))
+        print("Trabajando en N={:d}, p={:.3f}".format(_num_elements, _conn_prob))
         results = {}
         if parallel:
             num_cores = cpu_count()
@@ -109,22 +103,20 @@ def random_ris_phases(num_elements, connect_prob=[1.], los_amp=1., num_samples_s
                                               _num_elements, _conn_prob,
                                               los_amp, num_samples_fast)
                 expect_capac = np.append(expect_capac, __expect_cap)
-        #print(len(expect_capac))
         _erg_cap_mc = np.mean(expect_capac)
-        print("Simulated ergodic capacity: {:.3f}".format(_erg_cap_mc))
+        print("Capacidad ergódica simulada: {:.3f}".format(_erg_cap_mc))
         _hist = np.histogram(expect_capac, bins=100)
         _r_ax = np.linspace(0, 5, 2000)
         if logplot:
             _r_ax = np.logspace(np.log10(min(expect_capac)), np.log10(max(expect_capac)), 2000)
         _probs_cap_exact = [stats.binom(n=_num_elements, p=_conn_prob).pmf(__n) for __n in range(_num_elements+1)]
         if los_amp == 0.:
-            #_erg_cap_appr = -np.exp(1/_num_elements)*special.expi(-1/_num_elements)/np.log(2)
             _inv_exi = inverse_exp_expi(_r_ax*np.log(2))
             cdf_appr = stats.binom(n=_num_elements, p=_conn_prob).cdf(1/_inv_exi)
-            print("Calculating the exact ergodic capacities...")
+            print("Calculando las capacidades ergódicas exactas...")
             _erg_cap_exact = [ergodic_capac_exact(__n, los_amp=0.) for __n in range(_num_elements+1)]
-            print("Exact ergodic capacity: {}".format(_erg_cap_exact))
-            print("Exact ergodic probabilities: {}".format(_probs_cap_exact))
+            print("Capacidad ergódica exacta: {}".format(_erg_cap_exact))
+            print("Probabilidades ergódicas exactas: {}".format(_probs_cap_exact))
         else:
             _erg_cap_appr = [ergodic_capac_approximation(_n, los_amp) for _n in range(_num_elements+1)]
             print(_erg_cap_appr)
@@ -133,48 +125,33 @@ def random_ris_phases(num_elements, connect_prob=[1.], los_amp=1., num_samples_s
                               axis=0)
             _erg_cap_exact = [0.]
             _probs_cap_exact = [1.]
-        #erg_capac_appr.append(_erg_cap_appr)
-        #erg_cap_exact.append(_erg_cap_exact)
-        #erg_capac_mc.append(_erg_cap_mc) # technically all expect_capac should be equal
-        #print("Approximated ergodic capacity: {:.3f}".format(_erg_cap_appr))
         cdf_hist = stats.rv_histogram(_hist).cdf(_r_ax)
-        #cdf_appr = np.heaviside(_r_ax-_erg_cap_appr, 0)
         cdf_exact = np.sum([np.heaviside(_r_ax-__erg_cap, 0)*_p
                             for _p, __erg_cap in zip(_probs_cap_exact, _erg_cap_exact)],
                            axis=0)
         if plot:
             axs.plot(_r_ax, cdf_hist, label="ECDF -- N={:d}, p={:.2f}".format(_num_elements, _conn_prob))
-            axs.plot(_r_ax, cdf_appr, '--', label="Appr -- N={:d}, p={:.2f}".format(_num_elements, _conn_prob))
-            axs.plot(_r_ax, cdf_exact, '-.', label="Exact -- N={:d}, p={:.2f}".format(_num_elements, _conn_prob))
-            #axs.plot(_r_ax, stats.binom(n=_num_elements, p=_conn_prob).cdf(np.sqrt(2**_r_ax-1)), label="Optimal Phases")
+            axs.plot(_r_ax, cdf_appr, '--', label="Aproximación -- N={:d}, p={:.2f}".format(_num_elements, _conn_prob))
+            axs.plot(_r_ax, cdf_exact, '-.', label="Exacta -- N={:d}, p={:.2f}".format(_num_elements, _conn_prob))
         elif logplot:
             axs.semilogy(_r_ax, cdf_hist, label="ECDF -- N={:d}".format(_num_elements))
-            axs.semilogy(_r_ax, cdf_appr, '--', label="Appr -- {:d}".format(_num_elements))
-            axs.semilogy(_r_ax, cdf_exact, '-.', label="Exact -- {:d}".format(_num_elements))
+            axs.semilogy(_r_ax, cdf_appr, '--', label="Aproximación -- {:d}".format(_num_elements))
+            axs.semilogy(_r_ax, cdf_exact, '-.', label="Exacta -- {:d}".format(_num_elements))
         if export:
-            results["rate"] = _r_ax
+            results["tasa"] = _r_ax
             results["ecdf"] = cdf_hist
-            results["approx"] = cdf_appr
-            results["exact"] = cdf_exact
-            _fn_prefix = "out-prob-random-phase"
+            results["aproximacion"] = cdf_appr
+            results["exacta"] = cdf_exact
+            _fn_prefijo = "out-prob-fase-aleatoria"
             _fn_mid = "los-a{:.2f}".format(los_amp) if los_amp > 0 else "nlos"
             _fn_end = "N{:d}-p{:.3f}".format(_num_elements, _conn_prob)
-            _fn = "{}-{}-{}".format(_fn_prefix, _fn_mid, _fn_end)
+            _fn = "{}-{}-{}".format(_fn_prefijo, _fn_mid, _fn_end)
             export_results(results, _fn)
 
     if plot or logplot:
         axs.legend()
-        #axs.set_title("Artificial Fast Fading with N={:d} RIS Elements".format(num_elements))
-        axs.set_xlabel("Rate $R$")
-        axs.set_ylabel("Outage Probability $\\varepsilon$")
-
-    #if export:
-    #    erg_capac_results = {"N": num_elements, "mc": erg_capac_mc, "appr": erg_capac_appr}
-    #    _fn_prefix = "erg-capac-random-phase"
-    #    _fn_mid = "los-a{:.2f}".format(los_amp) if los_amp > 0 else "nlos"
-    #    _fn_end = "N{:d}".format(_num_elements)
-    #    _fn = "{}-{}-{}".format(_fn_prefix, _fn_mid, _fn_end)
-    #    export_results(erg_capac_results, _fn)
+        axs.set_xlabel("Tasa $R$")
+        axs.set_ylabel("Probabilidad de Interrupción $\\varepsilon$")
 
 if __name__ == "__main__":
     import argparse
